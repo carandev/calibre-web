@@ -280,6 +280,33 @@
                 </div>
             {% endif %}
 
+            {% if reading_progress|length > 0 %}
+                <div class="reading-progress-section">
+                    <h4><span class="glyphicon glyphicon-bookmark"></span> {{ _('Reading Progress') }}</h4>
+                    {% for progress in reading_progress %}
+                        <div class="reading-progress-item">
+                            <div class="progress-info">
+                                <span class="progress-format label label-default">{{ progress.format|upper }}</span>
+                                <span class="progress-percent">{{ progress.progress_percent|round(0)|int }}%</span>
+                            </div>
+                            <div class="progress reading-progress-bar">
+                                <div class="progress-bar progress-bar-success" role="progressbar" 
+                                     aria-valuenow="{{ progress.progress_percent|round(0)|int }}" 
+                                     aria-valuemin="0" aria-valuemax="100" 
+                                     style="width: {{ progress.progress_percent|round(0)|int }}%;">
+                                </div>
+                            </div>
+                            {% if progress.format in entry.reader_list %}
+                                <a href="{{ url_for('web.read_book', book_id=entry.id, book_format=progress.format) }}" 
+                                   target="_blank" class="btn btn-xs btn-success">
+                                    <span class="glyphicon glyphicon-play"></span> {{ _('Continue Reading') }}
+                                </a>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
 
             {% if entry.comments|length > 0 and entry.comments[0].text|length > 0 %}
                 <div class="comments">

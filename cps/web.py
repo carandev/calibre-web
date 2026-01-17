@@ -174,6 +174,169 @@ def set_bookmark(book_id, book_format):
     return "", 201
 
 
+# ################################### Reading Progress API ##################################################################
+
+
+@web.route("/ajax/reading-progress/<int:book_id>", methods=['GET'])
+@web.route("/ajax/reading-progress/<int:book_id>/<book_format>", methods=['GET'])
+@user_login_required
+def get_reading_progress(book_id, book_format=None):
+    """
+    Get reading progress for a book.
+    
+    GET /ajax/reading-progress/<book_id> - Returns all formats
+    GET /ajax/reading-progress/<book_id>/<format> - Returns specific format (epub, pdf)
+    
+    Response: {
+        "book_id": 123,
+        "format": "epub",
+        "progress_percent": 45.5,
+        "position": {"cfi": "epubcfi(/6/4!/4/2/1:0)"},
+        "device_id": "browser-abc123",
+        "last_modified": "2024-01-15T10:30:00Z"
+    }
+    """
+    if book_format:
+        progress = ub.get_reading_progress(current_user.id, book_id, book_format)
+        if progress:
+            return jsonify({
+                "book_id": progress.book_id,
+                "format": progress.format,
+                "progress_percent": progress.progress_percent,
+                "position": progress.position,
+                "device_id": progress.device_id,
+                "last_modified": progress.last_modified.isoformat() if progress.last_modified else None
+            })
+        return jsonify({"error": "No progress found"}), 404
+    else:
+        # Return all formats for this book
+        progress_list = ub.get_reading_progress(current_user.id, book_id)
+        if progress_list:
+            return jsonify([{
+                "book_id": p.book_id,
+                "format": p.format,
+                "progress_percent": p.progress_percent,
+                "position": p.position,
+                "device_id": p.device_id,
+                "last_modified": p.last_modified.isoformat() if p.last_modified else None
+            } for p in progress_list])
+        return jsonify([])
+
+
+@web.route("/ajax/reading-progress/<int:book_id>/<book_format>", methods=['POST'])
+@user_login_required
+def save_reading_progress(book_id, book_format):
+    """
+    Save reading progress for a book.
+    
+    POST /ajax/reading-progress/<book_id>/<format>
+    
+    Request body (JSON): {
+        "progress_percent": 45.5,
+        "position": {"cfi": "epubcfi(/6/4!/4/2/1:0)"}, // or {"page": 42, "total_pages": 100} for PDF
+        "device_id": "browser-abc123" // optional
+    }
+    
+    Response: 201 Created on success, 400 on error
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid JSON"}), 400
+        
+        progress_percent = data.get('progress_percent', 0.0)
+        position = data.get('position', {})
+        device_id = data.get('device_id')
+        
+        # Validate progress_percent
+        if not isinstance(progress_percent, (int, float)) or progress_percent < 0 or progress_percent > 100:
+            return jsonify({"error": "progress_percent must be between 0 and 100"}), 400
+        
+        # Validate position
+        if not isinstance(position, dict):
+            return jsonify({"error": "position must be an object"}), 400
+        
+        # Save progress
+        result = ub.save_reading_progress(
+            user_id=current_user.id,
+            book_id=book_id,
+            book_format=book_format,
+            progress_percent=progress_percent,
+            position=position,
+            device_id=device_id
+        )
+        
+        if result:
+            # Also update the read status in ReadBook table
+            ub.update_read_book_status_from_progress(current_user.id, book_id, progress_percent)
+            return "", 201
+        else:
+            return jsonify({"error": "Failed to save progress"}), 500
+            
+    except Exception as ex:
+        log.error("Error saving reading progress: %s", ex)
+        return jsonify({"error": str(ex)}), 500
+
+
+@web.route("/ajax/reading-progress/<int:book_id>/<book_format>", methods=['DELETE'])
+@user_login_required
+def delete_reading_progress(book_id, book_format):
+    """
+    Delete reading progress for a book.
+    
+    DELETE /ajax/reading-progress/<book_id>/<format>
+    
+    Response: 204 No Content on success
+    """
+    count = ub.delete_reading_progress(current_user.id, book_id, book_format)
+    if count >= 0:
+        return "", 204
+    return jsonify({"error": "Failed to delete progress"}), 500
+
+
+@web.route("/ajax/reading-progress/sync", methods=['GET'])
+@user_login_required
+def sync_reading_progress():
+    """
+    Get all reading progress for the current user, optionally filtered by date.
+    Useful for syncing between devices.
+    
+    GET /ajax/reading-progress/sync
+    GET /ajax/reading-progress/sync?since=2024-01-15T10:30:00Z
+    
+    Response: [{
+        "book_id": 123,
+        "format": "epub",
+        "progress_percent": 45.5,
+        "position": {"cfi": "..."},
+        "device_id": "browser-abc123",
+        "last_modified": "2024-01-15T10:30:00Z"
+    }, ...]
+    """
+    from datetime import datetime
+    
+    since_param = request.args.get('since')
+    since = None
+    
+    if since_param:
+        try:
+            # Parse ISO format datetime
+            since = datetime.fromisoformat(since_param.replace('Z', '+00:00'))
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use ISO format (e.g., 2024-01-15T10:30:00Z)"}), 400
+    
+    progress_list = ub.get_all_reading_progress(current_user.id, since)
+    
+    return jsonify([{
+        "book_id": p.book_id,
+        "format": p.format,
+        "progress_percent": p.progress_percent,
+        "position": p.position,
+        "device_id": p.device_id,
+        "last_modified": p.last_modified.isoformat() if p.last_modified else None
+    } for p in progress_list])
+
+
 @web.route("/ajax/toggleread/<int:book_id>", methods=['POST'])
 @user_login_required
 def toggle_read(book_id):
@@ -375,6 +538,43 @@ def get_sort_function(sort_param, data):
     return order, sort_param
 
 
+def get_continue_reading_books():
+    """
+    Get books that the current user is currently reading (0 < progress < 100).
+    Returns a list of book entries with reading progress information.
+    """
+    if not current_user.is_authenticated:
+        return []
+    
+    # Get reading progress entries
+    progress_list = ub.get_books_in_progress(current_user.id, limit=6)
+    if not progress_list:
+        return []
+    
+    # Get the book IDs and their progress
+    book_progress_map = {}
+    for progress in progress_list:
+        if progress.book_id not in book_progress_map:
+            book_progress_map[progress.book_id] = {
+                'progress_percent': progress.progress_percent,
+                'format': progress.format,
+                'last_modified': progress.last_modified
+            }
+    
+    # Get the actual book entries from calibre database
+    continue_reading = []
+    for book_id, progress_info in book_progress_map.items():
+        book_data = calibre_db.get_book_read_archived(book_id, config.config_read_column, allow_show_archived=False)
+        if book_data and book_data[0]:
+            book = book_data[0]
+            # Attach progress info to the book object
+            book.reading_progress_percent = progress_info['progress_percent']
+            book.reading_progress_format = progress_info['format']
+            continue_reading.append(book)
+    
+    return continue_reading
+
+
 def render_books_list(data, sort_param, book_id, page):
     order = get_sort_function(sort_param, data)
     if data == "rated":
@@ -420,8 +620,12 @@ def render_books_list(data, sort_param, book_id, page):
                                                                 db.books_series_link,
                                                                 db.Books.id == db.books_series_link.c.book,
                                                                 db.Series)
+        # Get continue reading books for authenticated users
+        continue_reading = get_continue_reading_books()
+        
         return render_title_template('index.html', random=random, entries=entries, pagination=pagination,
-                                     title=_("Books"), page=website, order=order[1])
+                                     title=_("Books"), page=website, order=order[1],
+                                     continue_reading=continue_reading)
 
 
 def render_rated_books(page, book_id, order):
@@ -1665,12 +1869,18 @@ def show_book(book_id):
             if media_format.format.lower() in constants.EXTENSIONS_AUDIO:
                 entry.audio_entries.append(media_format.format.lower())
 
+        # Get reading progress for this book (for authenticated users)
+        reading_progress = []
+        if current_user.is_authenticated:
+            reading_progress = ub.get_book_reading_progress(current_user.id, book_id)
+
         return render_title_template('detail.html',
                                      entry=entry,
                                      cc=cc,
                                      is_xhr=request.headers.get('X-Requested-With') == 'XMLHttpRequest',
                                      title=entry.title,
                                      books_shelfs=book_in_shelves,
+                                     reading_progress=reading_progress,
                                      page="book")
     else:
         log.debug("Selected book is unavailable. File does not exist or is not accessible")

@@ -38,6 +38,14 @@ See https://github.com/adobe-type-tools/cmap-resources
 	  <script src="{{ url_for('static', filename='js/libs/pdf.js') }}" type="module"></script>
 
     <script type="text/javascript">
+    // Calibre-web configuration for reading progress sync
+    window.calibre = {
+        bookId: {{ pdffile }},
+        bookFormat: "pdf",
+        readingProgressUrl: "{{ url_for('web.get_reading_progress', book_id=pdffile, book_format='pdf') }}",
+        isAuthenticated: {{ 'true' if current_user.is_authenticated else 'false' }}
+    };
+    
     window.addEventListener('webviewerloaded', function() {
         PDFViewerApplicationOptions.set('disableAutoFetch', true);
         PDFViewerApplicationOptions.set('disableRange', false);
@@ -521,5 +529,8 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     </div> <!-- outerContainer -->
     <div id="printContainer"></div>
+    
+    <!-- Reading Progress Sync -->
+    <script src="{{ url_for('static', filename='js/reading/pdf.js') }}"></script>
   </body>
 </html>

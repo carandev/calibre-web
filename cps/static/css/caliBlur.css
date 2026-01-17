@@ -7997,3 +7997,290 @@ div.comments[data-readmore] {
 }
 
 .dropdown-menu > .offscreen
+
+/* ============================================
+   READING PROGRESS STYLES
+   Fork: Calibre-Web Reading Progress Sync
+   ============================================ */
+
+/* Continue Reading Section - Index Page */
+.continue-reading {
+    margin-bottom: 50px;
+    position: relative;
+}
+
+.continue-reading h2 {
+    color: hsla(0, 0%, 100%, .85);
+    font-size: 1.5em;
+    font-weight: 300;
+    margin-bottom: 20px;
+    padding-left: 10px;
+    border-left: 3px solid #4a90d9;
+}
+
+.continue-reading .row {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 0 -10px;
+}
+
+.continue-reading .book-item {
+    padding: 10px;
+    position: relative;
+}
+
+.continue-reading .book-item .cover {
+    position: relative;
+    overflow: hidden;
+    border-radius: 3px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.continue-reading .book-item .cover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+}
+
+.continue-reading .book-item .cover img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Progress Badge - Overlay on book cover */
+.progress-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(74, 144, 217, 0.9);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 12px;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Mini Progress Bar - Below cover in index */
+.reading-progress-bar-mini {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.reading-progress-bar-mini .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4a90d9, #67a3e0);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+/* Continue Reading Button */
+.btn-continue-reading {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    text-align: center;
+    color: hsla(0, 0%, 100%, .7);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.btn-continue-reading:hover {
+    color: #fff;
+    background: rgba(74, 144, 217, 0.6);
+    border-color: rgba(74, 144, 217, 0.8);
+    text-decoration: none;
+}
+
+/* Book title in continue reading section */
+.continue-reading .book-title {
+    font-size: 12px;
+    color: hsla(0, 0%, 100%, .7);
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+/* ============================================
+   Reading Progress Section - Book Detail Page
+   ============================================ */
+
+.reading-progress-section {
+    margin: 20px 0;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.reading-progress-section h4 {
+    color: hsla(0, 0%, 100%, .85);
+    font-size: 14px;
+    font-weight: 500;
+    margin: 0 0 15px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Individual progress item (per format) */
+.reading-progress-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    flex-wrap: wrap;
+}
+
+.reading-progress-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+/* Progress info container (format + percent) */
+.reading-progress-item .progress-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 100px;
+}
+
+.reading-progress-item .progress-format {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.reading-progress-item .format-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: hsla(0, 0%, 100%, .6);
+    min-width: 45px;
+    padding: 3px 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    text-align: center;
+}
+
+.reading-progress-item .format-label.epub {
+    background: rgba(76, 175, 80, 0.3);
+    color: #81c784;
+}
+
+.reading-progress-item .format-label.pdf {
+    background: rgba(244, 67, 54, 0.3);
+    color: #e57373;
+}
+
+/* Standard Progress Bar - Detail page */
+.reading-progress-bar {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.reading-progress-bar .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4a90d9, #67a3e0);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.reading-progress-bar .progress-bar.complete {
+    background: linear-gradient(90deg, #4caf50, #66bb6a);
+}
+
+.reading-progress-item .progress-percent {
+    font-size: 13px;
+    font-weight: 500;
+    color: hsla(0, 0%, 100%, .85);
+    min-width: 45px;
+    text-align: right;
+}
+
+.reading-progress-item .btn-continue {
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #fff;
+    background: #4a90d9;
+    border: none;
+    border-radius: 3px;
+    text-decoration: none;
+    transition: background 0.2s ease;
+}
+
+.reading-progress-item .btn-continue:hover {
+    background: #3a7fc8;
+    text-decoration: none;
+    color: #fff;
+}
+
+/* No progress state */
+.reading-progress-section .no-progress {
+    color: hsla(0, 0%, 100%, .5);
+    font-size: 13px;
+    font-style: italic;
+    padding: 10px 0;
+}
+
+/* ============================================
+   Responsive Adjustments
+   ============================================ */
+
+@media (max-width: 991px) {
+    .continue-reading .book-item {
+        flex: 0 0 25%;
+        max-width: 25%;
+    }
+}
+
+@media (max-width: 767px) {
+    .continue-reading .book-item {
+        flex: 0 0 33.333%;
+        max-width: 33.333%;
+    }
+    
+    .reading-progress-item {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .reading-progress-bar {
+        flex: 1 1 100%;
+        order: 2;
+    }
+    
+    .reading-progress-item .btn-continue {
+        order: 3;
+        width: 100%;
+        text-align: center;
+        margin-top: 5px;
+    }
+}
+
+@media (max-width: 480px) {
+    .continue-reading .book-item {
+        flex: 0 0 50%;
+        max-width: 50%;
+    }
+    
+    .progress-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+    }
+}

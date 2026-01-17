@@ -2,6 +2,135 @@
 
 var reader;
 
+// Reading Progress Sync Module
+var ReadingProgressSync = (function() {
+    "use strict";
+    
+    var saveTimeout = null;
+    var lastSavedPosition = null;
+    var DEBOUNCE_MS = 2000; // Wait 2 seconds after last page change before saving
+    
+    /**
+     * Generate a unique device ID for this browser
+     */
+    function getDeviceId() {
+        var key = "calibre.reader.deviceId";
+        var deviceId = localStorage.getItem(key);
+        if (!deviceId) {
+            deviceId = "browser-" + Math.random().toString(36).substring(2, 15);
+            localStorage.setItem(key, deviceId);
+        }
+        return deviceId;
+    }
+    
+    /**
+     * Load reading progress from server API
+     * Returns a Promise that resolves with the progress data or null
+     */
+    function loadFromServer() {
+        if (!calibre.isAuthenticated || !calibre.readingProgressUrl) {
+            return Promise.resolve(null);
+        }
+        
+        return new Promise(function(resolve) {
+            $.ajax(calibre.readingProgressUrl, {
+                method: "GET",
+                dataType: "json"
+            }).done(function(data) {
+                if (data && data.position) {
+                    console.log("[ReadingProgress] Loaded from server:", data);
+                    resolve(data);
+                } else {
+                    resolve(null);
+                }
+            }).fail(function(xhr, status, error) {
+                console.warn("[ReadingProgress] Failed to load from server:", error);
+                resolve(null);
+            });
+        });
+    }
+    
+    /**
+     * Save reading progress to server API (debounced)
+     */
+    function saveToServer(progressData) {
+        if (!calibre.isAuthenticated || !calibre.readingProgressUrl) {
+            return;
+        }
+        
+        // Clear any pending save
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+        }
+        
+        // Debounce: wait before saving to avoid too many requests
+        saveTimeout = setTimeout(function() {
+            var csrftoken = $("input[name='csrf_token']").val();
+            
+            var payload = {
+                progress_percent: progressData.percentage * 100,
+                position: {
+                    cfi: progressData.cfi,
+                    percentage: progressData.percentage
+                },
+                device_id: getDeviceId()
+            };
+            
+            // Don't save if position hasn't changed
+            var positionKey = progressData.cfi + "-" + progressData.percentage;
+            if (lastSavedPosition === positionKey) {
+                return;
+            }
+            
+            $.ajax(calibre.readingProgressUrl, {
+                method: "POST",
+                contentType: "application/json",
+                data: JSON.stringify(payload),
+                headers: { "X-CSRFToken": csrftoken }
+            }).done(function() {
+                lastSavedPosition = positionKey;
+                console.log("[ReadingProgress] Saved to server:", Math.round(progressData.percentage * 100) + "%");
+            }).fail(function(xhr, status, error) {
+                console.warn("[ReadingProgress] Failed to save to server:", error);
+            });
+        }, DEBOUNCE_MS);
+    }
+    
+    /**
+     * Save to localStorage (fallback/cache)
+     */
+    function saveToLocal(positionKey, progressData) {
+        try {
+            localStorage.setItem(positionKey, JSON.stringify(progressData));
+        } catch (e) {
+            console.warn("[ReadingProgress] Failed to save to localStorage:", e);
+        }
+    }
+    
+    /**
+     * Load from localStorage
+     */
+    function loadFromLocal(positionKey) {
+        try {
+            var saved = localStorage.getItem(positionKey);
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        } catch (e) {
+            console.warn("[ReadingProgress] Failed to load from localStorage:", e);
+        }
+        return null;
+    }
+    
+    return {
+        getDeviceId: getDeviceId,
+        loadFromServer: loadFromServer,
+        saveToServer: saveToServer,
+        saveToLocal: saveToLocal,
+        loadFromLocal: loadFromLocal
+    };
+})();
+
 (function () {
     "use strict";
 
@@ -89,22 +218,38 @@ var reader;
         }
         make_locations
             .then(() => {
-                // Try to restore last position (CFI) from localStorage if present
-                try {
-                    var _savedPos = localStorage.getItem(position_key);
-                    if (_savedPos) {
-                        try {
-                            var _posObj = JSON.parse(_savedPos);
-                            if (_posObj && _posObj.cfi) {
-                                // Display the saved CFI location
-                                try {
-                                    reader.rendition.display(_posObj.cfi);
-                                } catch (e) {}
-                            }
-                        } catch (e) {}
+                // Try to restore position: first from server API, then from localStorage
+                return ReadingProgressSync.loadFromServer().then(function(serverData) {
+                    var localData = ReadingProgressSync.loadFromLocal(position_key);
+                    var positionToRestore = null;
+                    
+                    // Determine which position to use (most recent)
+                    if (serverData && serverData.position && serverData.position.cfi) {
+                        if (localData && localData.cfi) {
+                            // Both exist - use server data (it's the source of truth for multi-device)
+                            // In the future, we could compare timestamps
+                            positionToRestore = serverData.position;
+                            console.log("[ReadingProgress] Using server position");
+                        } else {
+                            positionToRestore = serverData.position;
+                            console.log("[ReadingProgress] Using server position (no local)");
+                        }
+                    } else if (localData && localData.cfi) {
+                        positionToRestore = localData;
+                        console.log("[ReadingProgress] Using local position (no server)");
                     }
-                } catch (e) {}
-
+                    
+                    // Restore the position
+                    if (positionToRestore && positionToRestore.cfi) {
+                        try {
+                            reader.rendition.display(positionToRestore.cfi);
+                        } catch (e) {
+                            console.warn("[ReadingProgress] Failed to restore position:", e);
+                        }
+                    }
+                });
+            })
+            .then(() => {
                 reader.rendition.on("relocated", (location) => {
                     let percentage = Math.round(location.end.percentage * 100);
                     progressDiv.textContent = percentage + "%";
@@ -123,17 +268,17 @@ var reader;
                         pagesDiv.style.visibility = "hidden";
                     }
 
-                    // Persist last position (CFI + percentage) to localStorage so reader can restore on next open
-                    try {
-                        var posObj = {
-                            cfi: location.start.cfi,
-                            percentage: location.start.percentage,
-                        };
-                        localStorage.setItem(
-                            position_key,
-                            JSON.stringify(posObj)
-                        );
-                    } catch (e) {}
+                    // Progress data to save
+                    var progressData = {
+                        cfi: location.start.cfi,
+                        percentage: location.start.percentage,
+                    };
+                    
+                    // Save to localStorage (immediate, for fast restore)
+                    ReadingProgressSync.saveToLocal(position_key, progressData);
+                    
+                    // Save to server API (debounced, for cross-device sync)
+                    ReadingProgressSync.saveToServer(progressData);
                 });
                 reader.rendition.reportLocation();
                 progressDiv.style.visibility = "visible";

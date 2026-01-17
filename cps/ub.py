@@ -229,6 +229,57 @@ class UserBase:
             session.rollback()
             log.error_or_exception(e)
 
+
+def get_books_in_progress(user_id, limit=6):
+    """
+    Get books that are currently being read (0 < progress < 100).
+    Returns the most recently read books first.
+    
+    Args:
+        user_id: The user's ID
+        limit: Maximum number of books to return (default 6)
+    
+    Returns:
+        List of tuples (book_id, format, progress_percent, position, last_modified)
+    """
+    try:
+        # Get all reading progress for this user where 0 < progress < 100
+        progress_list = session.query(ReadingProgress).filter(
+            ReadingProgress.user_id == user_id,
+            ReadingProgress.progress_percent > 0,
+            ReadingProgress.progress_percent < 100
+        ).order_by(ReadingProgress.last_modified.desc()).limit(limit).all()
+        
+        return progress_list
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        log.error_or_exception(e)
+        return []
+
+
+def get_book_reading_progress(user_id, book_id):
+    """
+    Get all reading progress entries for a specific book (all formats).
+    Returns the most recent progress first.
+    
+    Args:
+        user_id: The user's ID
+        book_id: The book's ID
+    
+    Returns:
+        List of ReadingProgress objects for all formats of this book.
+    """
+    try:
+        progress_list = session.query(ReadingProgress).filter(
+            ReadingProgress.user_id == user_id,
+            ReadingProgress.book_id == book_id
+        ).order_by(ReadingProgress.last_modified.desc()).all()
+        
+        return progress_list
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        log.error_or_exception(e)
+        return []
+
+
     def __repr__(self):
         return '<User %r>' % self.name
 
@@ -488,6 +539,23 @@ class KoboStatistics(Base):
     spent_reading_minutes = Column(Integer)
 
 
+# Reading Progress tracking for EPUB (CFI) and PDF (page number) synchronization across devices
+class ReadingProgress(Base):
+    __tablename__ = 'reading_progress'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'))
+    book_id = Column(Integer)
+    format = Column(String(10))  # 'epub', 'pdf'
+    progress_percent = Column(Float, default=0.0)
+    position = Column(JSON)  # {'cfi': '...'} for EPUB or {'page': 42, 'total_pages': 100} for PDF
+    device_id = Column(String(64), nullable=True)
+    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return '<ReadingProgress book_id=%r user_id=%r progress=%.1f%%>' % (self.book_id, self.user_id, self.progress_percent or 0)
+
+
 # Updates the last_modified timestamp in the KoboReadingState table if any of its children tables are modified.
 @event.listens_for(Session, 'before_flush')
 def receive_before_flush(session, flush_context, instances):
@@ -601,6 +669,12 @@ def migrate_user_session_table(engine, _session):
             trans.commit()
 
 
+def migrate_reading_progress_table(engine, _session):
+    """Create reading_progress table if it doesn't exist (for existing databases)."""
+    if not engine.dialect.has_table(engine.connect(), "reading_progress"):
+        ReadingProgress.__table__.create(bind=engine)
+
+
 # Migrate database to current version, has to be updated after every database change. Currently, migration from
 # maybe 4/5 versions back to current should work.
 # Migration is done by checking if relevant columns are existing, and then adding rows with SQL commands
@@ -609,6 +683,7 @@ def migrate_Database(_session):
     add_missing_tables(engine, _session)
     migrate_registration_table(engine, _session)
     migrate_user_session_table(engine, _session)
+    migrate_reading_progress_table(engine, _session)
 
 
 def clean_database(_session):
@@ -766,3 +841,178 @@ def session_commit(success=None, _session=None):
         s.rollback()
         log.error_or_exception(e)
     return ""
+
+
+# ============================================================================
+# Reading Progress CRUD Functions
+# ============================================================================
+
+def get_reading_progress(user_id, book_id, book_format=None):
+    """
+    Get reading progress for a user and book.
+    
+    Args:
+        user_id: The user's ID
+        book_id: The book's ID
+        book_format: Optional format filter ('epub', 'pdf'). If None, returns all formats.
+    
+    Returns:
+        ReadingProgress object or list of ReadingProgress objects, or None if not found.
+    """
+    try:
+        query = session.query(ReadingProgress).filter(
+            ReadingProgress.user_id == user_id,
+            ReadingProgress.book_id == book_id
+        )
+        if book_format:
+            return query.filter(ReadingProgress.format == book_format.lower()).first()
+        return query.all()
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        log.error_or_exception(e)
+        return None
+
+
+def save_reading_progress(user_id, book_id, book_format, progress_percent, position, device_id=None):
+    """
+    Save or update reading progress for a user and book.
+    
+    Args:
+        user_id: The user's ID
+        book_id: The book's ID
+        book_format: Format of the book ('epub', 'pdf')
+        progress_percent: Reading progress as percentage (0.0 to 100.0)
+        position: Position data as dict. For EPUB: {'cfi': '...'}, for PDF: {'page': X, 'total_pages': Y}
+        device_id: Optional device identifier for multi-device sync
+    
+    Returns:
+        The ReadingProgress object on success, None on failure.
+    """
+    try:
+        # Check if progress already exists
+        existing = session.query(ReadingProgress).filter(
+            ReadingProgress.user_id == user_id,
+            ReadingProgress.book_id == book_id,
+            ReadingProgress.format == book_format.lower()
+        ).first()
+        
+        if existing:
+            # Update existing progress
+            existing.progress_percent = progress_percent
+            existing.position = position
+            if device_id:
+                existing.device_id = device_id
+            # last_modified is auto-updated by onupdate
+        else:
+            # Create new progress entry
+            existing = ReadingProgress(
+                user_id=user_id,
+                book_id=book_id,
+                format=book_format.lower(),
+                progress_percent=progress_percent,
+                position=position,
+                device_id=device_id
+            )
+            session.add(existing)
+        
+        session.commit()
+        log.debug("Reading progress saved for user %s, book %s (%s): %.1f%%",
+                  user_id, book_id, book_format, progress_percent)
+        return existing
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        session.rollback()
+        log.error_or_exception(e)
+        return None
+
+
+def delete_reading_progress(user_id, book_id, book_format=None):
+    """
+    Delete reading progress for a user and book.
+    
+    Args:
+        user_id: The user's ID
+        book_id: The book's ID
+        book_format: Optional format filter. If None, deletes all formats for this book.
+    
+    Returns:
+        Number of deleted records, or -1 on error.
+    """
+    try:
+        query = session.query(ReadingProgress).filter(
+            ReadingProgress.user_id == user_id,
+            ReadingProgress.book_id == book_id
+        )
+        if book_format:
+            query = query.filter(ReadingProgress.format == book_format.lower())
+        
+        count = query.delete()
+        session.commit()
+        log.debug("Deleted %d reading progress records for user %s, book %s", count, user_id, book_id)
+        return count
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        session.rollback()
+        log.error_or_exception(e)
+        return -1
+
+
+def get_all_reading_progress(user_id, since=None):
+    """
+    Get all reading progress for a user, optionally filtered by modification date.
+    Useful for syncing between devices.
+    
+    Args:
+        user_id: The user's ID
+        since: Optional datetime. If provided, only returns progress modified after this time.
+    
+    Returns:
+        List of ReadingProgress objects.
+    """
+    try:
+        query = session.query(ReadingProgress).filter(ReadingProgress.user_id == user_id)
+        if since:
+            query = query.filter(ReadingProgress.last_modified > since)
+        return query.order_by(ReadingProgress.last_modified.desc()).all()
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        log.error_or_exception(e)
+        return []
+
+
+def update_read_book_status_from_progress(user_id, book_id, progress_percent):
+    """
+    Update the ReadBook status based on reading progress percentage.
+    
+    Args:
+        user_id: The user's ID
+        book_id: The book's ID
+        progress_percent: Reading progress as percentage (0.0 to 100.0)
+    """
+    try:
+        read_book = session.query(ReadBook).filter(
+            ReadBook.user_id == user_id,
+            ReadBook.book_id == book_id
+        ).first()
+        
+        # Determine new status based on progress
+        if progress_percent >= 100.0:
+            new_status = ReadBook.STATUS_FINISHED
+        elif progress_percent > 0:
+            new_status = ReadBook.STATUS_IN_PROGRESS
+        else:
+            new_status = ReadBook.STATUS_UNREAD
+        
+        if read_book:
+            if read_book.read_status != new_status:
+                read_book.read_status = new_status
+                session.commit()
+        else:
+            # Only create entry if there's actual progress
+            if new_status != ReadBook.STATUS_UNREAD:
+                read_book = ReadBook(
+                    user_id=user_id,
+                    book_id=book_id,
+                    read_status=new_status
+                )
+                session.add(read_book)
+                session.commit()
+    except (exc.OperationalError, exc.InvalidRequestError) as e:
+        session.rollback()
+        log.error_or_exception(e)
