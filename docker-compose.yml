@@ -1,0 +1,24 @@
+services:
+  calibre-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: calibre-web-reading-progress
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Bogota
+    volumes:
+      # Configuracion de la aplicacion (base de datos de usuarios, settings)
+      - ./config:/config
+      # Tu biblioteca de Calibre existente
+      - ./library:/books
+    ports:
+      - 8083:8083
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
